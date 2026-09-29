@@ -34,3 +34,6 @@ The same content stresses employee training and awareness, enterprise-wide secur
 - Liquid highlights local African expertise and independent ownership, a unified network with faster speeds, more reliability and tighter security, and a diverse product range for businesses of all sizes.
 - Customer segments listed: Enterprise, Small Business, Home, Connectivity Partners and Education.
 - Related pages cover Enterprise solutions, Small Business solutions and Data Centres.
+
+## Industries and customer segments served
+Liquid does not market itself around a fixed list of vertical industries. Instead, its public pages describe the types of customers (market segments) it serves: Enterprise, Small Business, Home, Connectivity Partners and Education. Its solutions - connectivity, cloud, cybersecurity, IoT, data centres and Microsoft 365/Azure services - are offered to businesses of all sizes across these segments, spanning both the public sector (governments) and private companies as noted in its cybersecurity content.
