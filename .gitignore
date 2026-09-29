@@ -9,7 +9,8 @@ venv/
 __pycache__/
 *.pyc
 
-# Generated vector database (rebuild with: python ingest.py)
+# Generated local search index (rebuild with: python ingest.py)
+kb_index.joblib
 chroma_db/
 
 # Gradio local files

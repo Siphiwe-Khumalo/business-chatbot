@@ -1,8 +1,7 @@
-# Render Blueprint — one-click deploy for the Business Knowledge AI Bot.
-# In Render: New + -> Blueprint -> connect this repo. Render reads this file,
-# then prompts you to paste the values for the secrets marked `sync: false`.
+# Render Blueprint - one-click deploy for the Business Knowledge AI Bot.
+# In Render: New + -> Blueprint -> connect this repo. Render reads this file.
 #
-# The GEMINI_API_KEY is entered in Render's dashboard, never committed here.
+# This app is fully local: it needs NO AI API and NO API key.
 services:
   - type: web
     name: business-chatbot
@@ -11,14 +10,11 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: python app.py
     envVars:
-      # Required — paste your key in the Render dashboard when prompted.
-      - key: GEMINI_API_KEY
-        sync: false
-      # Optional overrides (defaults are baked into the code).
-      - key: GEMINI_MODEL
-        value: gemini-2.5-flash
-      - key: GEMINI_EMBEDDING_MODEL
-        value: gemini-embedding-001
+      # Optional retrieval tuning (defaults are baked into the code).
+      - key: TOP_K
+        value: "4"
+      - key: SIMILARITY_THRESHOLD
+        value: "0.10"
       # Optional login. Leave unset for a public demo, or set both to require sign-in.
       - key: APP_USERNAME
         sync: false

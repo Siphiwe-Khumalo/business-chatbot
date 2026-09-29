@@ -1,61 +1,59 @@
 """
-ingest.py - Build the Chroma vector database from the Markdown knowledge base.
+ingest.py - Build a LOCAL TF-IDF search index from the Markdown knowledge base.
+
+No external API, no API key, no cloud service. Everything runs on your machine
+with plain Python + scikit-learn.
 
 Pipeline:
     knowledge-base/*.md
-        -> load_documents()    read every Markdown file
-        -> clean_documents()   tidy whitespace, drop empty files
-        -> split_documents()   cut into overlapping chunks + attach metadata
-        -> create_vector_store()  embed chunks with Gemini and store them in Chroma
+        -> load_documents()   read every Markdown file
+        -> clean_documents()  tidy whitespace, drop empty files
+        -> split_documents()  cut into overlapping chunks + attach metadata
+        -> build_index()      turn chunks into TF-IDF vectors and save them locally
 
 Run with:
     python ingest.py
 
-The database is REBUILT from scratch on every run, so it always matches the
-current contents of knowledge-base/ and never accumulates duplicate records.
+The index is REBUILT from scratch on every run, so it always matches the
+current contents of knowledge-base/ and never accumulates stale records.
+The result is saved to a single local file (see INDEX_PATH).
 """
 
 import os
 import re
 import sys
-import time
+from dataclasses import dataclass, field
 from pathlib import Path
 
+import joblib
 from dotenv import load_dotenv
-from langchain_chroma import Chroma
-from langchain_core.documents import Document
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from sklearn.feature_extraction.text import TfidfVectorizer
 
 # --------------------------------------------------------------------------
 # Shared configuration (answer.py imports these so both files stay in sync)
 # --------------------------------------------------------------------------
 BASE_DIR = Path(__file__).resolve().parent
-KNOWLEDGE_BASE_DIR = BASE_DIR / "knowledge-base"
-CHROMA_DIR = BASE_DIR / "chroma_db"
-COLLECTION_NAME = "liquid_knowledge"
+KNOWLEDGE_BASE_DIR = Path(os.getenv("KNOWLEDGE_BASE_PATH") or (BASE_DIR / "knowledge-base"))
 
-DEFAULT_EMBEDDING_MODEL = "gemini-embedding-001"
-PLACEHOLDER_API_KEY = "your_api_key_here"
+# Where the local search index is stored. A single file, rebuilt on every run.
+INDEX_PATH = Path(os.getenv("INDEX_PATH") or (BASE_DIR / "kb_index.joblib"))
 
 # Load variables from .env (if it exists). Real environment variables win.
+# Only LOCAL settings are read from .env now - no API key is ever required.
 load_dotenv(BASE_DIR / ".env")
+
+
+@dataclass
+class Document:
+    """A single knowledge-base document or chunk with its metadata."""
+
+    page_content: str
+    metadata: dict = field(default_factory=dict)
 
 
 # --------------------------------------------------------------------------
 # Small helpers for reading configuration
 # --------------------------------------------------------------------------
-def get_api_key() -> str:
-    """Return the Gemini API key or raise a clear error if it is missing."""
-    key = (os.getenv("GEMINI_API_KEY") or "").strip()
-    if not key or key == PLACEHOLDER_API_KEY:
-        raise RuntimeError(
-            "GEMINI_API_KEY is missing. Copy .env.example to .env and paste "
-            "your Gemini API key into it."
-        )
-    return key
-
-
 def get_int_env(name: str, default: int, minimum: int = 1) -> int:
     """Read a whole-number setting from the environment with validation."""
     raw = (os.getenv(name) or "").strip()
@@ -68,27 +66,6 @@ def get_int_env(name: str, default: int, minimum: int = 1) -> int:
     if value < minimum:
         raise RuntimeError(f"{name} must be at least {minimum}, but got {value}.")
     return value
-
-
-def get_embeddings() -> GoogleGenerativeAIEmbeddings:
-    """Create the Gemini embedding model (name comes from .env)."""
-    model = (os.getenv("GEMINI_EMBEDDING_MODEL") or "").strip() or DEFAULT_EMBEDDING_MODEL
-    return GoogleGenerativeAIEmbeddings(model=model, google_api_key=get_api_key())
-
-
-def get_chroma_store(embeddings) -> Chroma:
-    """
-    Open (or create) the persistent Chroma collection.
-
-    Cosine distance is used so that scores are easy to read: 0 means
-    "identical direction", larger numbers mean "less similar".
-    """
-    return Chroma(
-        collection_name=COLLECTION_NAME,
-        embedding_function=embeddings,
-        persist_directory=str(CHROMA_DIR),
-        collection_metadata={"hnsw:space": "cosine"},
-    )
 
 
 # --------------------------------------------------------------------------
@@ -129,7 +106,7 @@ def clean_text(text: str) -> str:
     - collapses 3+ blank lines into one blank line
     """
     text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
-    text = text.replace("\r\n", "\n").replace("\r", "\n").replace(" ", " ")
+    text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\u00a0", " ")
 
     cleaned_lines = []
     for line in text.split("\n"):
@@ -164,76 +141,123 @@ def split_documents(
     """
     Split documents into overlapping chunks.
 
-    Why chunk? An embedding represents the meaning of a piece of text. A whole
-    page mixes many topics, so its single vector would be vague and a question
-    would rarely match it well. Small chunks give sharp, focused vectors, and
-    they also keep the prompt sent to the LLM short. The overlap repeats a
-    little text at each boundary so a sentence cut in half still appears whole
+    Why chunk? Retrieval works best on small, focused passages: a whole page
+    mixes many topics, so a question rarely matches all of it well. Small chunks
+    give sharper matches and keep each answer passage short. The overlap repeats
+    a little text at each boundary so a sentence cut in half still appears whole
     in at least one chunk.
+
+    This is a dependency-free splitter that prefers to break on headings, then
+    blank lines, then single newlines, then spaces - mirroring the old behaviour
+    without needing an external text-splitter library.
     """
     if chunk_overlap >= chunk_size:
         raise RuntimeError("CHUNK_OVERLAP must be smaller than CHUNK_SIZE.")
 
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        # Prefer to break at headings, then paragraphs, lines, and finally words.
-        separators=["\n# ", "\n## ", "\n### ", "\n\n", "\n", " ", ""],
-    )
-    chunks = splitter.split_documents(documents)
-
-    # Give every chunk a stable id such as "services.md-0", "services.md-1", ...
+    separators = ["\n# ", "\n## ", "\n### ", "\n\n", "\n", " "]
+    chunks: list[Document] = []
     counters: dict[str, int] = {}
-    for chunk in chunks:
-        source = chunk.metadata["source"]
-        index = counters.get(source, 0)
-        chunk.metadata["chunk_id"] = f"{source}-{index}"
-        counters[source] = index + 1
+
+    for doc in documents:
+        pieces = _split_text(doc.page_content, chunk_size, chunk_overlap, separators)
+        source = doc.metadata["source"]
+        for piece in pieces:
+            piece = piece.strip()
+            if not piece:
+                continue
+            index = counters.get(source, 0)
+            metadata = dict(doc.metadata)
+            metadata["chunk_id"] = f"{source}-{index}"
+            counters[source] = index + 1
+            chunks.append(Document(page_content=piece, metadata=metadata))
+    return chunks
+
+
+def _split_text(text: str, chunk_size: int, chunk_overlap: int, separators: list[str]) -> list[str]:
+    """Recursively split text so chunks stay under chunk_size where possible."""
+    if len(text) <= chunk_size:
+        return [text]
+
+    # Find the first separator that actually appears in the text.
+    separator = ""
+    for candidate in separators:
+        if candidate and candidate in text:
+            separator = candidate
+            break
+
+    if not separator:
+        # No separator left: hard-cut into fixed windows with overlap.
+        step = max(1, chunk_size - chunk_overlap)
+        return [text[i : i + chunk_size] for i in range(0, len(text), step)]
+
+    parts = text.split(separator)
+    chunks: list[str] = []
+    current = ""
+    for part in parts:
+        piece = part if not current else current + separator + part
+        if len(piece) <= chunk_size:
+            current = piece
+            continue
+        if current:
+            chunks.append(current)
+        if len(part) > chunk_size:
+            chunks.extend(_split_text(part, chunk_size, chunk_overlap, separators))
+            current = ""
+        else:
+            current = part
+    if current:
+        chunks.append(current)
+
+    # Add overlap: prepend a tail of the previous chunk to each following chunk.
+    if chunk_overlap > 0 and len(chunks) > 1:
+        overlapped = [chunks[0]]
+        for i in range(1, len(chunks)):
+            tail = chunks[i - 1][-chunk_overlap:]
+            overlapped.append((tail + " " + chunks[i]).strip())
+        chunks = overlapped
     return chunks
 
 
 # --------------------------------------------------------------------------
-# Step 4 - embed and store
+# Step 4 - build the local TF-IDF index
 # --------------------------------------------------------------------------
-def _is_retryable(error: Exception) -> bool:
-    """Free-tier limits and brief outages are worth retrying; other errors are not."""
-    message = str(error).lower()
-    return any(word in message for word in ("429", "quota", "rate", "resource_exhausted", "503", "unavailable"))
+def build_index(chunks: list[Document]):
+    """
+    Turn the chunks into TF-IDF vectors and save everything to one local file.
 
+    TF-IDF (term frequency - inverse document frequency) scores each word by how
+    often it appears in a chunk versus how common it is across all chunks. Rare,
+    meaningful words get high weight; ubiquitous words get low weight. Comparing
+    a question's TF-IDF vector to each chunk's with cosine similarity gives a
+    good, fully-local relevance ranking - no embeddings API required.
+    """
+    texts = [chunk.page_content for chunk in chunks]
 
-def add_chunks_in_batches(store: Chroma, chunks: list[Document], batch_size: int = 20) -> None:
-    """Embed and store chunks in small batches, retrying on free-tier rate limits."""
-    max_attempts = 4
-    for start in range(0, len(chunks), batch_size):
-        batch = chunks[start : start + batch_size]
-        ids = [chunk.metadata["chunk_id"] for chunk in batch]
+    vectorizer = TfidfVectorizer(
+        lowercase=True,
+        stop_words="english",
+        ngram_range=(1, 2),  # single words and two-word phrases
+        sublinear_tf=True,
+    )
+    matrix = vectorizer.fit_transform(texts)
 
-        for attempt in range(1, max_attempts + 1):
-            try:
-                store.add_documents(batch, ids=ids)
-                break
-            except Exception as error:  # noqa: BLE001 - we re-raise below
-                if attempt == max_attempts or not _is_retryable(error):
-                    raise RuntimeError(f"Embedding/storing chunks failed: {error}") from error
-                wait_seconds = 10 * attempt
-                print(f"  ... rate limited, waiting {wait_seconds}s before retrying")
-                time.sleep(wait_seconds)
+    index = {
+        "vectorizer": vectorizer,
+        "matrix": matrix,
+        "chunks": [
+            {
+                "text": chunk.page_content,
+                "source": chunk.metadata.get("source", "unknown"),
+                "category": chunk.metadata.get("category", "unknown"),
+                "chunk_id": chunk.metadata.get("chunk_id", ""),
+            }
+            for chunk in chunks
+        ],
+    }
 
-        print(f"  Stored {min(start + batch_size, len(chunks))}/{len(chunks)} chunks")
-
-
-def create_vector_store(chunks: list[Document]) -> Chroma:
-    """Rebuild the Chroma collection from the given chunks and persist it."""
-    embeddings = get_embeddings()
-
-    # Start clean: delete the old collection so nothing is duplicated or stale.
-    old_store = get_chroma_store(embeddings)
-    old_store.delete_collection()
-
-    store = get_chroma_store(embeddings)
-    add_chunks_in_batches(store, chunks)
-    # Chroma writes to ./chroma_db automatically because persist_directory is set.
-    return store
+    INDEX_PATH.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(index, INDEX_PATH)
+    return index
 
 
 # --------------------------------------------------------------------------
@@ -241,7 +265,6 @@ def create_vector_store(chunks: list[Document]) -> Chroma:
 # --------------------------------------------------------------------------
 def main() -> None:
     try:
-        get_api_key()
         chunk_size = get_int_env("CHUNK_SIZE", 800)
         chunk_overlap = get_int_env("CHUNK_OVERLAP", 150, minimum=0)
 
@@ -260,8 +283,8 @@ def main() -> None:
         print(f"3/4 Splitting into chunks (size={chunk_size}, overlap={chunk_overlap}) ...")
         chunks = split_documents(documents, chunk_size, chunk_overlap)
 
-        print("4/4 Creating embeddings and storing them in Chroma ...")
-        create_vector_store(chunks)
+        print("4/4 Building the local TF-IDF index ...")
+        build_index(chunks)
 
     except (RuntimeError, FileNotFoundError) as error:
         print(f"\nERROR: {error}")
@@ -270,8 +293,8 @@ def main() -> None:
     print("\nSummary")
     print(f"  Documents loaded: {len(documents)}")
     print(f"  Chunks created: {len(chunks)}")
-    print(f"  Database folder: {CHROMA_DIR}")
-    print("Vector database created successfully.")
+    print(f"  Index file: {INDEX_PATH}")
+    print("Local knowledge-base index created successfully. No API key needed.")
 
 
 if __name__ == "__main__":

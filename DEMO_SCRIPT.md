@@ -10,7 +10,7 @@ Open the `knowledge-base/` folder and show the five Markdown files (about, servi
 ```bash
 python ingest.py
 ```
-"The documents are loaded, divided into smaller chunks, converted into embeddings and stored in Chroma." Point at the summary: documents loaded, chunks created, vector database created successfully.
+"The documents are loaded, divided into smaller chunks, converted into TF-IDF vectors with scikit-learn and saved to a local index file — all offline, no API." Point at the summary: documents loaded, chunks created, local index created successfully.
 
 ## Launch the application (≈10s)
 ```bash
@@ -39,8 +39,8 @@ Relevant Chunks
 ↓
 Context
 ↓
-LLM
+Local Python answer builder
 ↓
 Answer
 ```
-"The question is turned into an embedding, Chroma finds the most similar chunks, and only those go to the model as context. If nothing is close enough, the bot says it doesn't know. So the chatbot is grounded in the supplied knowledge base rather than simply answering from general model knowledge."
+"The question is turned into a TF-IDF vector, cosine similarity finds the most similar chunks, and only those are used to build the answer — assembled locally in Python from the documents themselves. If nothing is close enough, the bot says it doesn't know. So the chatbot is grounded in the supplied knowledge base, runs fully offline, and needs no API key."

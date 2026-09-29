@@ -11,7 +11,7 @@ import os
 import gradio as gr
 
 from answer import answer_question
-from ingest import CHROMA_DIR
+from ingest import INDEX_PATH
 from ingest import main as build_database
 
 TITLE = "Liquid Intelligent Technologies — Business Knowledge AI"
@@ -34,13 +34,13 @@ def format_sources(sources: list[dict]) -> str:
     blocks = []
     for number, item in enumerate(sources, start=1):
         status = (
-            "within relevance threshold, sent to the model"
+            "within relevance threshold, used in the answer"
             if item["relevant"]
-            else "beyond relevance threshold, NOT sent to the model"
+            else "below relevance threshold, NOT used"
         )
         quoted_text = item["text"].replace("\n", "\n> ")
         blocks.append(
-            f"**{number}. Source: {item['source']}** · distance {item['score']:.3f} · {status}\n\n> {quoted_text}"
+            f"**{number}. Source: {item['source']}** · similarity {item['score']:.3f} · {status}\n\n> {quoted_text}"
         )
     return "\n\n".join(blocks)
 
@@ -82,16 +82,16 @@ with gr.Blocks(title=TITLE) as demo:
 
 def ensure_database() -> None:
     """
-    On a fresh host (Hugging Face Space, Render, ...) there is no chroma_db/ yet,
-    because it is generated data and is not stored in Git. Build it once at startup.
+    On a fresh checkout there is no local index yet, because it is generated data
+    and is not stored in Git. Build it once at startup from knowledge-base/.
     """
-    if CHROMA_DIR.is_dir() and any(CHROMA_DIR.iterdir()):
+    if INDEX_PATH.is_file():
         return
-    print("No vector database found - building it from knowledge-base/ ...")
+    print("No local index found - building it from knowledge-base/ ...")
     try:
         build_database()
     except SystemExit:
-        print("Database build failed (check GEMINI_API_KEY). The app will show an error until it is fixed.")
+        print("Index build failed. The app will show a helpful message until it is fixed.")
 
 
 if __name__ == "__main__":

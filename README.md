@@ -2,9 +2,11 @@
 
 A small conversational assistant that answers questions from a **local company knowledge base** using Retrieval-Augmented Generation (RAG). The prototype company is Liquid Intelligent Technologies. The bot is **not** an official Liquid representative.
 
+**Runs 100% locally — no AI API, no API key, no cloud service.** Retrieval and answer generation are done in plain Python with scikit-learn (TF-IDF + cosine similarity).
+
 ## Problem
 
-A general-purpose LLM does not reliably know a specific company's facts, and it may sound confident while inventing them. This project grounds every company-specific answer in documents you supply, and says "I don't know" when the documents don't cover the question.
+A general-purpose LLM does not reliably know a specific company's facts, and it may sound confident while inventing them. This project grounds every answer in documents you supply, and says "I don't know" when the documents don't cover the question — without sending anything to an external service.
 
 ## Architecture
 
@@ -17,27 +19,26 @@ Cleaning
 ↓
 Chunking
 ↓
-Embeddings (Gemini)
+TF-IDF vectors (scikit-learn)
 ↓
-Chroma (persisted in ./chroma_db)
+Local index (kb_index.joblib)
 ↓
-Retriever (top-K similarity search + relevance threshold)
+Retriever (top-K cosine similarity + relevance threshold)
 ↓
-Gemini (answers from the retrieved chunks only)
-↓
-Answer
+Answer built locally in Python from the retrieved chunks only
 ↓
 Gradio
 ```
 
 ## Technologies
 
-- **Python**: everything is plain, readable Python.
-- **LangChain** (`langchain-core`, `langchain-text-splitters`, `langchain-chroma`, `langchain-google-genai`): text splitting and the Chroma / Gemini integrations.
-- **ChromaDB**: local persistent vector database.
-- **Gemini API**: embeddings and the chat model (free-tier compatible; model names set in `.env`).
+- **Python**: everything is plain, readable Python — retrieval and answering included.
+- **scikit-learn**: TF-IDF vectorisation + cosine similarity for local retrieval.
+- **joblib**: saves/loads the local search index (`kb_index.joblib`).
 - **Gradio**: simple web interface.
-- **python-dotenv**: loads settings from `.env`.
+- **python-dotenv**: loads optional local settings from `.env` (no API key).
+
+No AI API (Gemini/OpenAI/Anthropic) and no API key are used anywhere.
 
 ## Project structure
 
@@ -49,8 +50,8 @@ business-knowledge-ai-bot/
 │   ├── careers.md
 │   ├── local-offices.md
 │   └── insights.md
-├── ingest.py              # build the vector database
-├── answer.py              # RAG logic (retrieve + generate + fallback)
+├── ingest.py              # build the local TF-IDF search index
+├── answer.py              # RAG logic (retrieve + generate + fallback), fully local
 ├── app.py                 # Gradio interface
 ├── requirements.txt
 ├── .env.example
@@ -60,7 +61,7 @@ business-knowledge-ai-bot/
 └── DEMO_SCRIPT.md
 ```
 
-`chroma_db/` is created when you run ingestion.
+`kb_index.joblib` is created when you run ingestion.
 
 ## Installation
 
@@ -72,20 +73,18 @@ pip install -r requirements.txt
 
 (macOS/Linux: `source venv/bin/activate` instead of `venv\Scripts\activate`.)
 
-## Environment setup
+## Configuration (optional)
 
-Copy `.env.example` to `.env` and fill it in:
+**No API key is required.** The app works out of the box. If you want to tweak
+behaviour, copy `.env.example` to `.env` and set any of these local settings:
 
 | Variable | Meaning |
 | --- | --- |
-| `GEMINI_API_KEY` | Your key from Google AI Studio. Keep it only in `.env`. |
-| `GEMINI_MODEL` | Chat model (default `gemini-2.5-flash`). |
-| `GEMINI_EMBEDDING_MODEL` | Embedding model (default `gemini-embedding-001`). |
+| `KNOWLEDGE_BASE_PATH` | Folder with the Markdown files (default `knowledge-base`). |
+| `INDEX_PATH` | Where the local index is saved (default `kb_index.joblib`). |
 | `TOP_K` | Chunks retrieved per question (default 4). |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | Chunking settings (default 800 / 150). |
-| `RELEVANCE_THRESHOLD` | Maximum cosine distance for a chunk to be used (default 0.65). |
-
-If Gemini reports "model not found", check the current model names in Google AI Studio and update `.env`.
+| `SIMILARITY_THRESHOLD` | **Minimum** cosine similarity (0–1) a chunk must reach to be used (default 0.10). Higher = stricter. If nothing reaches it, the bot returns the fallback. |
 
 ## Knowledge base
 
@@ -97,7 +96,7 @@ The five Markdown files in `knowledge-base/` are pre-filled with summaries, writ
 python ingest.py
 ```
 
-This loads the files, cleans them, splits them into chunks (with `source`, `category` and `chunk_id` metadata), embeds them with Gemini and stores them in Chroma. The database is rebuilt from scratch on every run, so it always matches the current files and never contains duplicates. Run it again whenever you edit the knowledge base, and restart the app afterwards.
+This loads the files, cleans them, splits them into chunks (with `source`, `category` and `chunk_id` metadata), turns them into TF-IDF vectors with scikit-learn and saves the index to `kb_index.joblib`. The index is rebuilt from scratch on every run, so it always matches the current files and never contains duplicates. Run it again whenever you edit the knowledge base, and restart the app afterwards. (The app also builds the index automatically on first start if it is missing.)
 
 ## Run the application
 
@@ -107,7 +106,7 @@ python app.py
 
 Open the local address Gradio prints (usually http://127.0.0.1:7860).
 
-You can also test from the terminal and see the distance scores:
+You can also test from the terminal and see the similarity scores:
 
 ```bash
 python answer.py "What services does the company offer?"
@@ -130,10 +129,8 @@ Deploy once and share the URL — no local Python needed. Two easy options:
 1. Push this repo to GitHub (already done if you are reading this on GitHub).
 2. In Render: **New +** → **Blueprint** → connect this repo. Render reads
    [`render.yaml`](render.yaml).
-3. When prompted, paste your `GEMINI_API_KEY` (from
-   [Google AI Studio](https://aistudio.google.com/apikey)) as the secret value.
-   Leave `APP_USERNAME` / `APP_PASSWORD` blank for a public demo, or set both to
-   require sign-in.
+3. No API key is needed. Leave `APP_USERNAME` / `APP_PASSWORD` blank for a public
+   demo, or set both to require sign-in.
 4. Deploy. Render gives you an `https://…onrender.com` URL that is HTTPS, so the
    app is installable as described above.
 
@@ -142,22 +139,24 @@ Deploy once and share the URL — no local Python needed. Two easy options:
 1. Create a new Space, SDK = **Gradio**, and push these files to it.
 2. Keep the Space metadata header (`sdk: gradio`, `app_file: app.py`) at the top
    of the Space's own `README.md`.
-3. In **Settings → Variables and secrets**, add `GEMINI_API_KEY` as a *secret*.
+3. No secrets are needed — the app is fully local.
 
 Notes for either host:
 
-- Never upload `.env`; the key lives only in the host's secret settings.
-- On first start the app builds `chroma_db/` automatically if it is missing
-  (this makes one round of Gemini embedding calls, so the first boot is slower).
+- No API key or secret is required.
+- On first start the app builds `kb_index.joblib` automatically if it is missing
+  (a quick, local TF-IDF pass — no network calls).
 - Optional login: set `APP_USERNAME` and `APP_PASSWORD` on the host.
 
-## How RAG works
+## How it works (fully local)
 
-1. Your question is turned into an embedding (a list of numbers capturing its meaning).
-2. Chroma finds the chunks whose embeddings are closest to it.
-3. Chunks that are too far away (beyond the relevance threshold) are discarded. If none are left, the bot answers with the fallback and never calls the LLM.
-4. Otherwise the remaining chunks are sent to Gemini together with the question and strict instructions to answer only from them.
+1. Your question is turned into a TF-IDF vector using the same vocabulary the knowledge base was indexed with.
+2. Cosine similarity ranks every chunk against your question; the top‑K are kept.
+3. Chunks below the similarity threshold are discarded. If none remain, the bot returns the fallback and does **not** guess.
+4. Otherwise the answer is composed in plain Python: the sentences from the retrieved chunks that best match your question are selected (verbatim, so nothing is invented) and stitched into one concise, grounded response.
 5. The answer is shown with the retrieved source files and chunk text.
+
+Simple greetings ("hi") and thanks are handled with small conversational replies, and empty input asks you to type a question — all without any external service.
 
 ## Example questions
 
@@ -177,8 +176,8 @@ Should trigger the fallback:
 
 - Limited knowledge base: it only knows what you paste in.
 - Retrieval quality depends on the quality of the source documents.
-- The similarity threshold is a practical heuristic, not a validated confidence score. Tune `RELEVANCE_THRESHOLD` using `python answer.py` output.
-- LLM responses can still contain errors.
+- The similarity threshold is a practical heuristic, not a validated confidence score. Tune `SIMILARITY_THRESHOLD` using `python answer.py` output.
+- Answers are assembled from the source text (extractive), so they read as short quoted facts rather than free-flowing prose. This keeps them strictly grounded and API-free.
 - No live website synchronization.
 - No authentication.
 - Prototype, not a production enterprise system.
