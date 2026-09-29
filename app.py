@@ -6,9 +6,13 @@ Run with:
 then open the local URL that Gradio prints (usually http://127.0.0.1:7860).
 """
 
+import os
+
 import gradio as gr
 
 from answer import answer_question
+from ingest import CHROMA_DIR
+from ingest import main as build_database
 
 TITLE = "Liquid Intelligent Technologies — Business Knowledge AI"
 DESCRIPTION = "Ask questions about information contained in the provided company knowledge base."
@@ -76,5 +80,32 @@ with gr.Blocks(title=TITLE) as demo:
     question_box.submit(ask, inputs=[question_box, show_sources_box], outputs=[answer_output, sources_output])
 
 
+def ensure_database() -> None:
+    """
+    On a fresh host (Hugging Face Space, Render, ...) there is no chroma_db/ yet,
+    because it is generated data and is not stored in Git. Build it once at startup.
+    """
+    if CHROMA_DIR.is_dir() and any(CHROMA_DIR.iterdir()):
+        return
+    print("No vector database found - building it from knowledge-base/ ...")
+    try:
+        build_database()
+    except SystemExit:
+        print("Database build failed (check GEMINI_API_KEY). The app will show an error until it is fixed.")
+
+
 if __name__ == "__main__":
-    demo.launch()
+    ensure_database()
+
+    # Hosting platforms set PORT (Render) or SPACE_ID (Hugging Face); they need 0.0.0.0.
+    # Locally we stay on 127.0.0.1 so the app is not exposed to your network.
+    hosted = bool(os.getenv("PORT") or os.getenv("SPACE_ID"))
+
+    # Optional login: set APP_USERNAME and APP_PASSWORD on the host to require it.
+    username, password = os.getenv("APP_USERNAME"), os.getenv("APP_PASSWORD")
+
+    demo.launch(
+        server_name="0.0.0.0" if hosted else "127.0.0.1",
+        server_port=int(os.getenv("PORT", "7860")),
+        auth=(username, password) if username and password else None,
+    )

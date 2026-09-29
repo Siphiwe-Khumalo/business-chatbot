@@ -113,6 +113,17 @@ You can also test from the terminal and see the distance scores:
 python answer.py "What services does the company offer?"
 ```
 
+## Hosting (optional)
+
+The app can run on a host such as a Hugging Face Space (Gradio SDK) or Render:
+
+- Upload/connect `app.py`, `answer.py`, `ingest.py`, `requirements.txt` and `knowledge-base/`. Never upload `.env`.
+- Store `GEMINI_API_KEY` as a secret in the host's settings (and `GEMINI_MODEL` / `GEMINI_EMBEDDING_MODEL` as variables).
+- On first start the app builds `chroma_db/` automatically if it is missing.
+- Render: build command `pip install -r requirements.txt`, start command `python app.py`.
+- Hugging Face: keep the metadata header (`sdk: gradio`, `app_file: app.py`) that the Space creates at the top of its own `README.md`.
+- Optional login: set `APP_USERNAME` and `APP_PASSWORD` on the host.
+
 ## How RAG works
 
 1. Your question is turned into an embedding (a list of numbers capturing its meaning).
