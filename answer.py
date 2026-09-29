@@ -27,7 +27,7 @@ from ingest import (
     get_int_env,
 )
 
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-3.5-flash-lite"
 
 # Cosine distance: 0 = identical direction, larger = less similar. A chunk is used
 # only if its distance is <= this value. This is a practical heuristic for a

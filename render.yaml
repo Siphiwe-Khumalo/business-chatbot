@@ -16,7 +16,7 @@ services:
         sync: false
       # Optional overrides (defaults are baked into the code).
       - key: GEMINI_MODEL
-        value: gemini-2.5-flash
+        value: gemini-3.5-flash-lite
       - key: GEMINI_EMBEDDING_MODEL
         value: gemini-embedding-001
       # Optional login. Leave unset for a public demo, or set both to require sign-in.

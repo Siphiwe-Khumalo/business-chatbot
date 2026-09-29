@@ -79,7 +79,7 @@ Copy `.env.example` to `.env` and fill it in:
 | Variable | Meaning |
 | --- | --- |
 | `GEMINI_API_KEY` | Your key from Google AI Studio. Keep it only in `.env`. |
-| `GEMINI_MODEL` | Chat model (default `gemini-2.5-flash`). |
+| `GEMINI_MODEL` | Chat model (default `gemini-3.5-flash-lite`; older names like `gemini-2.5-flash` have been retired by Google). |
 | `GEMINI_EMBEDDING_MODEL` | Embedding model (default `gemini-embedding-001`). |
 | `TOP_K` | Chunks retrieved per question (default 4). |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | Chunking settings (default 800 / 150). |
