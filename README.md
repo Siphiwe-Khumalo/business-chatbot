@@ -113,15 +113,42 @@ You can also test from the terminal and see the distance scores:
 python answer.py "What services does the company offer?"
 ```
 
-## Hosting (optional)
+## Installable web app (PWA)
 
-The app can run on a host such as a Hugging Face Space (Gradio SDK) or Render:
+The app is served as an installable Progressive Web App. Once it is hosted over
+HTTPS, visitors can install it straight from the browser — an **Install app**
+icon appears in the desktop address bar, and mobile browsers offer **Add to Home
+Screen**. It then opens in its own window like a native app. This is enabled by
+`pwa=True` in `app.py`; Gradio serves the `/manifest.json` automatically.
 
-- Upload/connect `app.py`, `answer.py`, `ingest.py`, `requirements.txt` and `knowledge-base/`. Never upload `.env`.
-- Store `GEMINI_API_KEY` as a secret in the host's settings (and `GEMINI_MODEL` / `GEMINI_EMBEDDING_MODEL` as variables).
-- On first start the app builds `chroma_db/` automatically if it is missing.
-- Render: build command `pip install -r requirements.txt`, start command `python app.py`.
-- Hugging Face: keep the metadata header (`sdk: gradio`, `app_file: app.py`) that the Space creates at the top of its own `README.md`.
+## Hosting
+
+Deploy once and share the URL — no local Python needed. Two easy options:
+
+### Render (one click, via the included blueprint)
+
+1. Push this repo to GitHub (already done if you are reading this on GitHub).
+2. In Render: **New +** → **Blueprint** → connect this repo. Render reads
+   [`render.yaml`](render.yaml).
+3. When prompted, paste your `GEMINI_API_KEY` (from
+   [Google AI Studio](https://aistudio.google.com/apikey)) as the secret value.
+   Leave `APP_USERNAME` / `APP_PASSWORD` blank for a public demo, or set both to
+   require sign-in.
+4. Deploy. Render gives you an `https://…onrender.com` URL that is HTTPS, so the
+   app is installable as described above.
+
+### Hugging Face Space (Gradio SDK)
+
+1. Create a new Space, SDK = **Gradio**, and push these files to it.
+2. Keep the Space metadata header (`sdk: gradio`, `app_file: app.py`) at the top
+   of the Space's own `README.md`.
+3. In **Settings → Variables and secrets**, add `GEMINI_API_KEY` as a *secret*.
+
+Notes for either host:
+
+- Never upload `.env`; the key lives only in the host's secret settings.
+- On first start the app builds `chroma_db/` automatically if it is missing
+  (this makes one round of Gemini embedding calls, so the first boot is slower).
 - Optional login: set `APP_USERNAME` and `APP_PASSWORD` on the host.
 
 ## How RAG works

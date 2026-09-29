@@ -108,4 +108,7 @@ if __name__ == "__main__":
         server_name="0.0.0.0" if hosted else "127.0.0.1",
         server_port=int(os.getenv("PORT", "7860")),
         auth=(username, password) if username and password else None,
+        # Serve a web app manifest so the site is installable from the browser
+        # ("Install app" on desktop, "Add to Home Screen" on mobile).
+        pwa=True,
     )
