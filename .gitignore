@@ -1,0 +1,25 @@
+# Secrets
+.env
+
+# Virtual environments
+venv/
+.venv/
+
+# Python caches
+__pycache__/
+*.pyc
+
+# Generated vector database (rebuild with: python ingest.py)
+chroma_db/
+
+# Gradio local files
+.gradio/
+
+# Editor / OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Packaging output
+*.zip
